@@ -1,36 +1,51 @@
 <?php
 /**
- * Allows CMS user to create forms dynamically.
+ * A form field allowing a user to customize and create form fields.
+ * for saving into a {@link UserDefinedForm}
  *
  * @package userforms
  */
 
 class FieldEditor extends FormField {
 	
-	protected $hasFormOptions = true;
-
+	/**
+	 * Field Editor Template
+	 *
+	 * @return String
+	 */
 	function FieldHolder() {
 		return $this->renderWith("FieldEditor");
 	}
 	
 	/**
-	 * Can a user edit this field?
+	 * Returns whether a user can edit the form
+	 *
 	 * @return boolean
 	 */
 	public function canEdit() {
 		if($this->readonly) return false;
+		
 		return $this->form->getRecord()->canEdit();
 	}
 	
 	/**
-	 * Can a user delete this field?
+	 * Returns whether a user delete a field in the form. The {@link EditableFormField}s
+	 * check if they can delete themselves but this counts as an {@link self::canEdit()}
+	 * function rather than a delete
+	 *
 	 * @return boolean
 	 */
 	public function canDelete() {
 		if($this->readonly) return false;
-		return $this->form->getRecord()->canDelete();
+		
+		return $this->form->getRecord()->canEdit();
 	}
 
+	/**
+	 * Transform this form field to a readonly version.
+	 *
+	 * @return ViewableData_Customised
+	 */
 	function performReadonlyTransformation() {
 		$clone = clone $this;
 		$clone->readonly = true;
@@ -43,15 +58,11 @@ class FieldEditor extends FormField {
 	}
 	
 	/**
-	 * Return the Form Fields for the user forms
+	 * Return the fields for the user forms
 	 * 
 	 * @return DataObjectSet
 	 */
 	function Fields() {
-		Requirements::css("userforms/css/FieldEditor.css");
-		Requirements::javascript(SAPPHIRE_DIR ."/thirdparty/jquery-ui/jquery-ui-1.8rc3.custom.js");
-		Requirements::javascript("userforms/javascript/UserForm.js");
-
 		// Don't return any fields unless we actually have the dependent parameters set on the form field
 		if($this->form && $this->form->getRecord() && $this->name) {
 			$relationName = $this->name;
@@ -67,6 +78,7 @@ class FieldEditor extends FormField {
 					}
 				}
 			}
+			
 			return $fields;
 		}
 	}
@@ -107,12 +119,7 @@ class FieldEditor extends FormField {
 	 */
 	function saveInto(DataObject $record) {
 		$name = $this->name;
-		$fieldSet = $record->$name();		        
-		
-		// @todo shouldn't we deal with customFormActions on that object?
-		$record->EmailOnSubmit = isset($_REQUEST[$name]['EmailOnSubmit']) ? "1" : "0";
-		$record->SubmitButtonText = isset($_REQUEST[$name]['SubmitButtonText']) ? $_REQUEST[$name]['SubmitButtonText'] : "";
-		$record->ShowClearButton = isset($_REQUEST[$name]['ShowClearButton']) ? "1" : "0";
+		$fieldSet = $record->$name();
 		
 		// store the field IDs and delete the missing fields
 		// alternatively, we could delete all the fields and re add them
@@ -157,14 +164,6 @@ class FieldEditor extends FormField {
 				}
 			}
     	}
-
-    	if($record->hasMethod('customFormSave')) {
-			$record->customFormSave($_REQUEST[$name], $record);
-		}	
-		
-		if($record->hasMethod('processNewFormFields')) {
-			$record->processNewFormFields();
-		}
 	}
 	
 	/**
@@ -229,29 +228,5 @@ class FieldEditor extends FormField {
 			}
 		}
 		return false;
-	}
-
-	function setHasFormOptions($bool){
-		$this->hasFormOptions = $bool;
-	}
-	
-	function hasFormOptions(){
-		return $this->hasFormOptions;
-	}
-	
-	function FormOptions() {
-		if($this->hasFormOptions()){
-		    if($this->form->getRecord()->hasMethod('customFormActions')) {
-		        $newFields = $this->form->getRecord()->customFormActions($this->readonly);
-
-		        foreach($newFields as $newField) {
-		        	$newField->setName("{$this->name}[{$newField->Name()}]" );
-		        }
-			    if($this->readonly) {
-					$newFields = $newFields->makeReadonly();
-			    }
-			    return $newFields;
-		    }
-    	}
 	}
 }

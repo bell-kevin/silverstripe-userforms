@@ -44,11 +44,13 @@ class EditableDateField extends EditableFormField {
 		// scripts for jquery date picker
 		Requirements::javascript(THIRDPARTY_DIR .'/jquery-ui/jquery.ui.core.js');
 		Requirements::javascript(THIRDPARTY_DIR .'/jquery-ui/jquery.ui.datepicker.js');
+		
+		$dateFormat = 'yy-mm-dd'; // force ISO-format DateField_View_JQuery::convert_iso_to_jquery_format(i18n::get_date_format());
 
 		Requirements::customScript(<<<JS
 			(function(jQuery) {
 				$(document).ready(function() {
-					$('input[name^=EditableDateField]').attr('autocomplete', 'off').datepicker({dateFormat: 'yy-mm-dd'});
+					$('input[name^=EditableDateField]').attr('autocomplete', 'off').datepicker({ dateFormat: '$dateFormat' });
 				});
 			})(jQuery);
 JS

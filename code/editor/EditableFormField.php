@@ -16,16 +16,10 @@ class EditableFormField extends DataObject {
 		"Default" => "Varchar",
 		"Sort" => "Int",
 		"Required" => "Boolean",
-		"CanDelete" => "Boolean",
 		"CustomErrorMessage" => "Varchar(255)",
 		"CustomRules" => "Text",
 		"CustomSettings" => "Text",
 		"CustomParameter" => "Varchar(200)"
-	);
-    
-	static $defaults = array(
-		"CanDelete" => "1",
-		"ShowOnLoad" => "1"
 	);
     
 	static $has_one = array(
@@ -35,32 +29,37 @@ class EditableFormField extends DataObject {
 	static $extensions = array(
 		"Versioned('Stage', 'Live')"
 	);
-
+	
+	/**
+	 * @var bool
+	 */
 	protected $readonly;
 	
-
 	/**
-	 * Set this formfield to readonly
-	 */
-	public function setReadonly() {
-		$this->readonly = true;
+	 * Set the visibility of an individual form field
+	 *
+	 * @param bool
+	 */ 
+	public function setReadonly($readonly = true) {
+		$this->readonly = $readonly;
 	}
 
 	/**
-	 * Is this multipleoption field readonly to the user
-	 *
+	 * Returns whether this field is readonly 
+	 * 
 	 * @return bool
 	 */
-	public function isReadonly() {
+	private function isReadonly() {
 		return $this->readonly;
 	}
 	
+	/**
+	 * Template to render the form field into
+	 *
+	 * @return String
+	 */
 	function EditSegment() {
 		return $this->renderWith('EditableFormField');
-	}
-	
-	function ClassName() {
-		return $this->class;
 	}
 	
 	/**
@@ -70,7 +69,7 @@ class EditableFormField extends DataObject {
 	 * @return bool
 	 */
 	public function canDelete() {
-		return $this->Parent()->canEdit();
+		return ($this->Parent()->canEdit() && !$this->isReadonly());
 	}
 	
 	/**
@@ -80,7 +79,7 @@ class EditableFormField extends DataObject {
 	 * @return bool
 	 */
 	public function canEdit() {
-		return $this->Parent()->canEdit();
+		return ($this->Parent()->canEdit() && !$this->isReadonly());
 	}
 	
 	/**
@@ -117,7 +116,7 @@ class EditableFormField extends DataObject {
 	 * 
 	 * @return Array Return all the Settings
 	 */
-	public function getFieldSettings() {
+	public function getSettings() {
 		return (!empty($this->CustomSettings)) ? unserialize($this->CustomSettings) : array();
 	}
 	
@@ -127,8 +126,22 @@ class EditableFormField extends DataObject {
 	 *
 	 * @param Array the custom settings
 	 */
-	public function setFieldSettings($settings = array()) {
+	public function setSettings($settings = array()) {
 		$this->CustomSettings = serialize($settings);
+	}
+	
+	/**
+	 * Set a given field setting. Appends the option to the settings or overrides
+	 * the existing value
+	 *
+	 * @param String key 
+	 * @param String value
+	 */
+	public function setSetting($key, $value) {
+		$settings = $this->getSettings();
+		$settings[$key] = $value;
+		
+		$this->setSettings($settings);
 	}
 	
 	/**
@@ -139,7 +152,7 @@ class EditableFormField extends DataObject {
 	 * @return String
 	 */
 	public function getSetting($setting) {
-		$settings = $this->getFieldSettings();
+		$settings = $this->getSettings();
 		if(isset($settings) && count($settings) > 0) {
 			if(isset($settings[$setting])) {
 				return $settings[$setting];
@@ -153,7 +166,7 @@ class EditableFormField extends DataObject {
 	 *
 	 * @return string
 	 */
-	public function Icon() {
+	public function getIcon() {
 		return 'userforms/images/' . strtolower($this->class) . '.png';
 	}
 	
@@ -186,6 +199,7 @@ class EditableFormField extends DataObject {
 	public function Dependencies() {
 		return ($this->CustomRules) ? unserialize($this->CustomRules) : array();
 	}
+	
 	/**
 	 * Return the custom validation fields for the field
 	 * 
@@ -196,54 +210,76 @@ class EditableFormField extends DataObject {
 		$fields = $this->Parent()->Fields();
 
 		// check for existing ones
-		if($this->CustomRules) {
-			$rules = unserialize($this->CustomRules);
+		if($rules = $this->Dependencies()) {
+			foreach($rules as $rule => $data) {
+				// recreate all the field object to prevent caching
+				$outputFields = new DataObjectSet();
+				
+				foreach($fields as $field) {
+					$new = clone $field;
 
-			if($rules) {
-				foreach($rules as $rule => $data) {
-					// recreate all the field object to prevent caching
-					$outputFields = new DataObjectSet();
-					foreach($fields as $field) {
-						$new = clone $field;
-						$new->isSelected = ($new->Name == $data['ConditionField']) ? true : false;
-						$outputFields->push($new);
-					}
-					$output->push(new ArrayData(array(
-						'FieldName' => $this->FieldName(),
-						'Display' => $data['Display'],
-						'Fields' => $outputFields,
-						'ConditionField' => $data['ConditionField'],
-						'ConditionOption' => $data['ConditionOption'],
-						'Value' => $data['Value']
-					)));
+					$new->isSelected = ($new->Name == $data['ConditionField']) ? true : false;
+					$outputFields->push($new);
 				}
+				
+				$output->push(new ArrayData(array(
+					'FieldName' => $this->getFieldName(),
+					'Display' => $data['Display'],
+					'Fields' => $outputFields,
+					'ConditionField' => $data['ConditionField'],
+					'ConditionOption' => $data['ConditionOption'],
+					'Value' => $data['Value']
+				)));
 			}
 		}
+	
 		return $output;
 	}
 
+	/**
+	 * Title field of the field in the backend of the page
+	 *
+	 * @return TextField
+	 */
 	function TitleField() {
-		$titleAttr = Convert::raw2att($this->Title);
-		$readOnlyAttr = (!$this->canEdit()) ? ' disabled="disabled"' : '';
-		
-		return "<input type=\"text\" class=\"text\" title=\"("._t('EditableFormField.ENTERQUESTION', 'Enter Question').")\" value=\"$titleAttr\" name=\"Fields[{$this->ID}][Title]\"$readOnlyAttr />";
+		//do not XML escape the title field here, because that would result in a recursive escaping of the escaped text on every save
+		$field = new TextField('Title', _t('EditableFormField.ENTERQUESTION', 'Enter Question'), $this->getField('Title'));
+		$field->setName($this->getFieldName('Title'));
+
+		if(!$this->canEdit()) {
+			return $field->performReadonlyTransformation();
+		}
+
+		return $field;
+	}
+
+	/** Returns the Title for rendering in the front-end (with XML values escaped) */
+	function getTitle() {
+		return Convert::raw2att($this->getField('Title'));
 	}
 
 	/**
 	 * Return the base name for this form field in the 
-	 * form builder
+	 * form builder. Optionally returns the name with the given field
+	 *
+	 * @param String Field Name
 	 *
 	 * @return String
 	 */
-	public function FieldName() {
-		return "Fields[".$this->ID."]";
+	public function getFieldName($field = false) {
+		return ($field) ? "Fields[".$this->ID."][".$field."]" : "Fields[".$this->ID."]";
 	}
 	
 	/**
-	 * @todo Fix this - shouldn't name be returning name?!?
+	 * Generate a name for the Setting field
+	 *
+	 * @param String name of the setting
+	 * @return String
 	 */
-	public function BaseName() {
-		return $this->Name;
+	public function getSettingFieldName($field) {
+		$name = $this->getFieldName('CustomSettings');
+		
+		return $name . '[' . $field .']';
 	}
 	
 	/**
@@ -257,31 +293,33 @@ class EditableFormField extends DataObject {
 	 * @access public
 	 */
 	public function populateFromPostData($data) {
-		$this->Title = (isset($data['Title'])) ? $data['Title']: "";
-		$this->Default = (isset($data['Default'])) ? $data['Default'] : "";
-		$this->Sort = (isset($data['Sort'])) ? $data['Sort'] : null;
-		$this->Required = !empty($data['Required']) ? 1 : 0;
-  		$this->CanDelete = (isset($data['CanDelete']) && !$data['CanDelete']) ? 0 : 1;
-		$this->Name = $this->class.$this->ID;
-		$this->CustomErrorMessage = (isset($data['CustomErrorMessage'])) ? $data['CustomErrorMessage'] : "";
-		$this->CustomRules = "";
-		$this->CustomSettings = "";
-		$this->ShowOnLoad = (isset($data['ShowOnLoad']) && $data['ShowOnLoad'] == "Show") ? 1 : 0;
+		$this->Title 		= (isset($data['Title'])) ? $data['Title']: "";
+		$this->Default 		= (isset($data['Default'])) ? $data['Default'] : "";
+		$this->Sort 		= (isset($data['Sort'])) ? $data['Sort'] : null;
+		$this->Required 	= !empty($data['Required']) ? 1 : 0;
+		$this->Name 		= $this->class.$this->ID;
+		$this->CustomRules	= "";
+		$this->CustomErrorMessage	= (isset($data['CustomErrorMessage'])) ? $data['CustomErrorMessage'] : "";
+		$this->CustomSettings		= "";
+		
 		// custom settings
 		if(isset($data['CustomSettings'])) {
-			$this->setFieldSettings($data['CustomSettings']);
+			$this->setSettings($data['CustomSettings']);
 		}
 
 		// custom validation
 		if(isset($data['CustomRules'])) {
 			$rules = array();
+			
 			foreach($data['CustomRules'] as $key => $value) {
 
 				if(is_array($value)) {
 					$fieldValue = (isset($value['Value'])) ? $value['Value'] : '';
+					
 					if(isset($value['ConditionOption']) && $value['ConditionOption'] == "Blank" || $value['ConditionOption'] == "NotBlank") {
 						$fieldValue = "";
 					}
+					
 					$rules[] = array(
 						'Display' => (isset($value['Display'])) ? $value['Display'] : "",
 						'ConditionField' => (isset($value['ConditionField'])) ? $value['ConditionField'] : "",
@@ -290,11 +328,13 @@ class EditableFormField extends DataObject {
 					);
 				}
 			}
+			
 			$this->CustomRules = serialize($rules);
 		}
+		
 		$this->write();
 	}
-	
+	 
 	/**
 	 * Implement custom field Configuration on this field. Includes such things as
 	 * settings and options of a given editable form field
@@ -302,7 +342,13 @@ class EditableFormField extends DataObject {
 	 * @return FieldSet
 	 */
 	public function getFieldConfiguration() {
-		return new FieldSet();
+		return new FieldSet(
+			new TextField(
+				$this->getSettingFieldName('RightTitle'), 
+				_t('EditableFormField.RIGHTTITLE', 'Right Title'), 
+				$this->getSetting('RightTitle')
+			)
+		);
 	}
 	
 	/**
@@ -313,15 +359,16 @@ class EditableFormField extends DataObject {
 	 */
 	public function getFieldValidationOptions() {
 		$fields = new FieldSet(
-			new CheckboxField("Fields[$this->ID][Required]", _t('EditableFormField.REQUIRED', 'Is this field Required?'), $this->Required),
-			new TextField("Fields[$this->ID][CustomErrorMessage]", _t('EditableFormField.CUSTOMERROR','Custom Error Message'), $this->CustomErrorMessage)
+			new CheckboxField($this->getFieldName('Required'), _t('EditableFormField.REQUIRED', 'Is this field Required?'), $this->Required),
+			new TextField($this->getFieldName('CustomErrorMessage'), _t('EditableFormField.CUSTOMERROR','Custom Error Message'), $this->CustomErrorMessage)
 		);
 		
 		if(!$this->canEdit()) {
 			foreach($fields as $field) {
-				$fields->performReadonlyTransformation();
+				$field->performReadonlyTransformation();
 			}
 		}
+		
 		return $fields;
 	}
 	
@@ -343,46 +390,16 @@ class EditableFormField extends DataObject {
 	public function getSubmittedFormField() {
 		return new SubmittedFormField();
 	}
-
+	
+	
+	/**
+	 * Show this form field (and its related value) in the reports and in emails.
+	 *
+	 * @return bool
+	 */
 	function showInReports() {
 		return true;
 	}
-    
-    function prepopulate($value) {
-        $this->prepopulateFromMap($this->parsePrepopulateValue($value));
-    }
-    
-    protected function parsePrepopulateValue($value) {
-        $paramList = explode(',', $value);
-        $paramMap = array();
-        
-        foreach($paramList as $param) {
-    
-            if(preg_match( '/([^=]+)=(.+)/', $param, $match)) {
-                if(isset($paramMap[$match[1]]) && is_array($paramMap[$match[1]])) {
-                    $paramMap[$match[1]][] = $match[2];
-                } else if(isset( $paramMap[$match[1]])) {
-                    $paramMap[$match[1]] = array($paramMap[$match[1]]);
-                    $paramMap[$match[1]][] = $match[2];
-                } else {
-                    $paramMap[$match[1]] = $match[2];
-                }
-            }
-        }
-        return $paramMap;   
-    }
-    
-    protected function prepopulateFromMap($paramMap) {
-        foreach($paramMap as $field => $fieldValue) {
-            if(!is_array($fieldValue)) {
-                $this->$field = $fieldValue;
-            }   
-        }
-    }
-
-    function Type() {
-        return $this->class;   
-    }
    
 	/**
 	 * Return the validation information related to this field. This is 
@@ -394,5 +411,20 @@ class EditableFormField extends DataObject {
 	 */
 	public function getValidation() {
 		return array();
+	}
+	
+	/**
+	 * Return the error message for this field. Either uses the custom
+	 * one (if provided) or the default SilverStripe message
+	 *
+	 * @return Varchar
+	 */
+	public function getErrorMessage() {
+		$title = strip_tags("'". ($this->Title ? $this->Title : $this->Name) . "'");
+		$standard = sprintf(_t('Form.FIELDISREQUIRED', '%s is required').'.', $title);
+		
+		$errorMessage = ($this->CustomErrorMessage) ? $this->CustomErrorMessage : $standard;
+		
+		return DBField::create('Varchar', $errorMessage);
 	}
 }
