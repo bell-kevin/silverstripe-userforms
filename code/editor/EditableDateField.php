@@ -45,7 +45,7 @@ class EditableDateField extends EditableFormField {
 		Requirements::javascript(THIRDPARTY_DIR .'/jquery-ui/jquery.ui.core.js');
 		Requirements::javascript(THIRDPARTY_DIR .'/jquery-ui/jquery.ui.datepicker.js');
 		
-		$dateFormat = 'yy-mm-dd'; // force ISO-format DateField_View_JQuery::convert_iso_to_jquery_format(i18n::get_date_format());
+		$dateFormat = 'yy-mm-dd'; // force ISO-format - original: DateField_View_JQuery::convert_iso_to_jquery_format(i18n::get_date_format());
 
 		Requirements::customScript(<<<JS
 			(function(jQuery) {
