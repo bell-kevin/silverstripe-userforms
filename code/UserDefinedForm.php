@@ -476,8 +476,14 @@ class UserDefinedForm_Controller extends Page_Controller {
 						messages:
 							$messages
 						,
+						errorPlacement: function(error, element) {
+					if (element.attr("type") == "radio" && element.parent().get(0).tagName.toLowerCase() == "li")
+						error.insertAfter(element.parents("ul"));
+					else
+						error.insertAfter(element);
+					},
 						rules: 
-						 	$rules
+							$rules
 					});
 				});
 			})(jQuery);
