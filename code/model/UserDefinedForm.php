@@ -12,16 +12,6 @@
 class UserDefinedForm extends Page {
 	
 	/**
-	 * @var String Icon for the User Defined Form in the CMS. Without the extension
-	 */
-	static $icon = "cms/images/treeicons/task";
-	
-	/**
-	 * @var String What level permission is needed to edit / add 
-	 */
-	static $need_permission = array('ADMIN');
-
-	/**
 	 * @var String Required Identifier
 	 */
 	static $required_identifier = null;
@@ -324,14 +314,10 @@ class UserDefinedForm_Controller extends Page_Controller {
 	 * @return Array
 	 */
 	public function index() {
-		if($content = $this->Content) {
-			$hasLocation = stristr($content, '$UserDefinedForm');
-			
+		if($this->Content && $form = $this->Form()) {
+			$hasLocation = stristr($this->Content, '$UserDefinedForm');
 			if($hasLocation) {
-				$replace = ($form = $this->Form()) ? $form->forTemplate() : "";
-				
-				$content = str_ireplace('$UserDefinedForm', $replace, $content);
-				
+				$content = str_ireplace('$UserDefinedForm', $form->forTemplate(), $this->Content);
 				return array(
 					'Content' => DBField::create('HTMLText', $content),
 					'Form' => ""
@@ -353,17 +339,21 @@ class UserDefinedForm_Controller extends Page_Controller {
 	 */
 	function Form() {
 		$fields = $this->getFormFields();
-		if(!$fields || !$fields->exists()) return false;
+		if(!$fields) return false;
 		
 		$actions = $this->getFormActions();
 		
 		// get the required fields including the validation
 		$required = $this->getRequiredFields();
-		
+
 		// generate the conditional logic 
 		$this->generateConditionalJavascript();
-		
+
 		$form = new Form($this, "Form", $fields, $actions, $required);
+		
+		$data = Session::get("FormInfo.{$form->FormName()}.data");
+		
+		if(is_array($data)) $form->loadDataFrom($data);
 		
 		$this->extend('updateForm', $form);
 		
@@ -379,7 +369,7 @@ class UserDefinedForm_Controller extends Page_Controller {
 	 */
 	function getFormFields() {
 		$fields = new FieldSet();
-				
+
 		if($this->Fields()) {
 			foreach($this->Fields() as $editableField) {
 				// get the raw form field from the editable version
@@ -404,13 +394,24 @@ class UserDefinedForm_Controller extends Page_Controller {
 						$field->setTitle($title);
 					}
 				}
+				// if this field has an extra class
+				if($editableField->getSetting('ExtraClass')) {
+					$field->addExtraClass(Convert::raw2att(
+						$editableField->getSetting('ExtraClass')
+					));
+				}
+				
+				// set the values passed by the url to the field
+				$request = $this->getRequest();
+				if($var = $request->getVar($field->name)) {
+					$field->value = Convert::raw2att($var);
+				}
 				
 				$fields->push($field);
 			}
 		}
-		
 		$this->extend('updateFormFields', $fields);
-		
+
 		return $fields;
 	}
 	
@@ -455,8 +456,8 @@ class UserDefinedForm_Controller extends Page_Controller {
 		if($this->Fields()) {
 			foreach($this->Fields() as $field) {
 				$messages[$field->Name] = $field->getErrorMessage()->HTML();
-				
-				if($field->Required) {
+	
+				if($field->Required && $field->CustomRules()->Count() == 0) {
 					$rules[$field->Name] = array_merge(array('required' => true), $field->getValidation());
 					$required->addRequiredField($field->Name);
 				}
@@ -472,7 +473,15 @@ class UserDefinedForm_Controller extends Page_Controller {
 			(function($) {
 				$(document).ready(function() {
 					$("#Form_Form").validate({
+						ignore: [':hidden'],
 						errorClass: "required",	
+						errorPlacement: function(error, element) {
+							if(element.is(":radio")) {
+								error.insertAfter(element.closest("ul"));
+							} else {
+								error.insertAfter(element);
+							}
+						},
 						messages:
 							$messages
 						,
@@ -648,6 +657,26 @@ JS
 	 * @return Redirection
 	 */
 	function process($data, $form) {
+		Session::set("FormInfo.{$form->FormName()}.data",$data);	
+		Session::clear("FormInfo.{$form->FormName()}.errors");
+		
+		foreach($this->Fields() as $field) {
+			$messages[$field->Name] = $field->getErrorMessage()->HTML();
+				
+			if($field->Required && $field->CustomRules()->Count() == 0) {
+				if(	!isset($data[$field->Name]) ||
+					!$data[$field->Name] ||
+					!$field->getFormField()->validate($this->validator)
+				){
+					$form->addErrorMessage($field->Name,$field->getErrorMessage()->HTML(),'bad');
+				}
+			}
+		}
+		
+		if(Session::get("FormInfo.{$form->FormName()}.errors")){
+			Director::redirectBack();
+			return;
+		}
 		
 		$submittedForm = Object::create('SubmittedForm');
 		$submittedForm->SubmittedByID = ($id = Member::currentUserID()) ? $id : 0;
@@ -665,11 +694,10 @@ JS
 			
 			if(!$field->showInReports()) continue;
 			
-			// create a new submitted form field.
 			$submittedField = $field->getSubmittedFormField();
 			$submittedField->ParentID = $submittedForm->ID;
 			$submittedField->Name = $field->Name;
-			$submittedField->Title = $field->Title;
+			$submittedField->Title = $field->getField('Title');
 			
 			// save the value from the data
 			if($field->hasMethod('getValueFromData')) {
@@ -702,7 +730,7 @@ JS
 			}
 			
 			if(!$this->DisableSaveSubmissions) $submittedField->write();
-			
+	
 			$submittedFields->push($submittedField);
 		}
 		
@@ -720,7 +748,7 @@ JS
 			if($attachments){
 				foreach($attachments as $file){
 					if($file->ID != 0) {
-						$email->attachFile($file->Filename,$file->Filename, $file->getFileType());
+						$email->attachFile($file->Filename,$file->Filename, HTTP::getMimeType($file->Filename));
 					}
 				}
 			}
@@ -764,6 +792,9 @@ JS
 				}
 			}
 		}
+		
+		Session::clear("FormInfo.{$form->FormName()}.errors");
+		Session::clear("FormInfo.{$form->FormName()}.data");
 		
 		$referrer = (isset($data['Referrer'])) ? '?referrer=' . urlencode($data['Referrer']) : "";
 		
